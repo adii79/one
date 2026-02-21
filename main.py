@@ -7,7 +7,7 @@ import requests
 import threading
 import time
 from ultralytics import YOLO
-import io
+from datetime import datetime
 
 # =========================
 # CONFIG
@@ -15,6 +15,8 @@ import io
 ESP32_STREAM_URL = "http://192.168.4.1:81/stream"
 ESP32_CONTROL_URL = "http://192.168.4.1/control?var=framesize&val="
 MODEL_PATH = "best.pt"
+
+FIREBASE_DB_URL = "https://your-project-id-default-rtdb.firebaseio.com/carbon_data.json"
 
 RESOLUTION_MAP = {
     "QQVGA (160x120)": 10,
@@ -24,10 +26,33 @@ RESOLUTION_MAP = {
     "XGA (1024x768)": 4,
 }
 
+# Example Carbon Emission Factors (kg CO2 per detection event)
+CARBON_FACTORS = {
+    "person": 0.02,
+    "car": 2.3,
+    "truck": 5.5,
+    "bus": 6.8,
+    "motorcycle": 1.1
+}
+
 # =========================
 # LOAD MODEL
 # =========================
 model = YOLO(MODEL_PATH)
+
+# =========================
+# HELPER FUNCTIONS
+# =========================
+def calculate_carbon(object_name, confidence):
+    base_value = CARBON_FACTORS.get(object_name.lower(), 0.01)
+    return round(base_value * confidence, 4)
+
+def send_carbon_to_firebase(data):
+    try:
+        requests.post(FIREBASE_DB_URL, json=data, timeout=3)
+        print("Carbon data sent to Firebase")
+    except Exception as e:
+        print("Firebase Error:", e)
 
 # =========================
 # MAIN APP
@@ -36,7 +61,7 @@ class YOLOApp:
 
     def __init__(self, root):
         self.root = root
-        self.root.title("ESP32-CAM Object Detection System")
+        self.root.title("ESP32-CAM Carbon Monitoring System")
         self.root.geometry("1400x850")
         self.root.configure(bg="#1e1e1e")
 
@@ -47,13 +72,13 @@ class YOLOApp:
         self.create_ui()
 
     # =========================
-    # UI DESIGN
+    # UI
     # =========================
     def create_ui(self):
 
         title = tk.Label(
             self.root,
-            text="ESP32-CAM YOLO Detection Dashboard",
+            text="ESP32-CAM Carbon Emission Dashboard",
             font=("Arial", 24, "bold"),
             bg="#1e1e1e",
             fg="white"
@@ -71,7 +96,7 @@ class YOLOApp:
         control_frame = tk.Frame(main_frame, bg="#2d2d2d", width=400)
         control_frame.pack(side="right", fill="y", padx=10, pady=10)
 
-        # Confidence slider
+        # Confidence
         tk.Label(control_frame, text="Confidence Threshold",
                  font=("Arial", 14), bg="#2d2d2d", fg="white").pack(pady=10)
 
@@ -86,7 +111,7 @@ class YOLOApp:
         self.conf_slider.set(0.5)
         self.conf_slider.pack()
 
-        # Auto detect interval
+        # Auto interval
         tk.Label(control_frame, text="Auto Detect Interval (sec)",
                  font=("Arial", 14), bg="#2d2d2d", fg="white").pack(pady=10)
 
@@ -94,12 +119,13 @@ class YOLOApp:
         self.interval_entry.insert(0, "5")
         self.interval_entry.pack(pady=5)
 
-        # Resolution dropdown
+        # Resolution
         tk.Label(control_frame, text="ESP32 Resolution",
                  font=("Arial", 14), bg="#2d2d2d", fg="white").pack(pady=10)
 
         self.resolution_var = tk.StringVar()
         self.resolution_var.set("VGA (640x480)")
+
         resolution_menu = ttk.Combobox(
             control_frame,
             textvariable=self.resolution_var,
@@ -108,15 +134,11 @@ class YOLOApp:
         )
         resolution_menu.pack(pady=5)
 
-        tk.Button(
-            control_frame,
-            text="Set Resolution",
-            command=self.set_resolution,
-            font=("Arial", 14),
-            bg="#444",
-            fg="white",
-            width=20
-        ).pack(pady=10)
+        tk.Button(control_frame, text="Set Resolution",
+                  command=self.set_resolution,
+                  font=("Arial", 14),
+                  bg="#444", fg="white",
+                  width=20).pack(pady=10)
 
         # Buttons
         tk.Button(control_frame, text="Start Stream",
@@ -143,7 +165,7 @@ class YOLOApp:
                   bg="#ffc107", fg="black",
                   width=20).pack(pady=5)
 
-        # Results panel
+        # Results
         tk.Label(control_frame, text="Detection Results",
                  font=("Arial", 16, "bold"),
                  bg="#2d2d2d", fg="white").pack(pady=15)
@@ -196,7 +218,7 @@ class YOLOApp:
         self.video_label.image = img
 
     # =========================
-    # DETECTION
+    # DETECTION + CARBON
     # =========================
     def detect_objects(self):
         if self.current_frame is None:
@@ -210,12 +232,40 @@ class YOLOApp:
 
         self.result_text.delete(1.0, tk.END)
 
+        total_carbon = 0
+        detections_payload = []
+
         for box in results[0].boxes:
             cls = int(box.cls[0])
             conf_val = float(box.conf[0])
             name = model.names[cls]
-            self.result_text.insert(tk.END,
-                                    f"{name} - {conf_val:.2f}\n")
+
+            carbon_value = calculate_carbon(name, conf_val)
+            total_carbon += carbon_value
+
+            self.result_text.insert(
+                tk.END,
+                f"{name} | Conf: {conf_val:.2f} | CO2: {carbon_value} kg\n"
+            )
+
+            detections_payload.append({
+                "object": name,
+                "confidence": round(conf_val, 3),
+                "carbon_kg": carbon_value
+            })
+
+        firebase_data = {
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "total_carbon_kg": round(total_carbon, 4),
+            "detection_count": len(detections_payload),
+            "detections": detections_payload
+        }
+
+        threading.Thread(
+            target=send_carbon_to_firebase,
+            args=(firebase_data,),
+            daemon=True
+        ).start()
 
     # =========================
     # AUTO DETECT

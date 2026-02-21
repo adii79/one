@@ -1,696 +1,123 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Mangrove Detection System</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;600;800&display=swap" rel="stylesheet">
-<style>
-/* ── Reset & base ────────────────────────────────────────────── */
-*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-:root {
-  --bg:        #080f08;
-  --surface:   #0e1a0e;
-  --surface2:  #152015;
-  --border:    #1e341e;
-  --green:     #00dc5a;
-  --green-dim: #1a5c32;
-  --green-glow:#00dc5a44;
-  --amber:     #ffc355;
-  --red:       #ff5252;
-  --text:      #c8e6c8;
-  --text-dim:  #5a845a;
-  --mono:      'Space Mono', monospace;
-  --sans:      'Syne', sans-serif;
-}
-
-html { font-size: 14px; }
-
-body {
-  background: var(--bg);
-  color: var(--text);
-  font-family: var(--sans);
-  min-height: 100vh;
-  overflow-x: hidden;
-}
-
-/* scanline overlay */
-body::before {
-  content: '';
-  position: fixed; inset: 0;
-  background: repeating-linear-gradient(
-    0deg, transparent, transparent 2px,
-    rgba(0,0,0,.08) 2px, rgba(0,0,0,.08) 4px);
-  pointer-events: none; z-index: 9999;
-}
-
-/* ── Scrollbar ───────────────────────────────────────────────── */
-::-webkit-scrollbar { width: 4px; }
-::-webkit-scrollbar-track { background: var(--surface); }
-::-webkit-scrollbar-thumb { background: var(--green-dim); border-radius: 2px; }
-
-/* ── Top bar ─────────────────────────────────────────────────── */
-header {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 14px 24px;
-  background: var(--surface);
-  border-bottom: 1px solid var(--border);
-  position: sticky; top: 0; z-index: 100;
-}
-.logo {
-  font-family: var(--sans); font-weight: 800; font-size: 1.3rem;
-  color: var(--green); letter-spacing: -.02em;
-  display: flex; align-items: center; gap: 10px;
-}
-.logo-dot {
-  width: 10px; height: 10px; border-radius: 50%;
-  background: var(--green);
-  box-shadow: 0 0 12px var(--green);
-  animation: blink 2s ease-in-out infinite;
-}
-@keyframes blink { 0%,100%{opacity:1} 50%{opacity:.2} }
-
-.header-right { display: flex; align-items: center; gap: 16px; }
-
-.badge {
-  font-family: var(--mono); font-size: .7rem;
-  padding: 4px 10px; border-radius: 3px;
-  border: 1px solid; letter-spacing: .05em; text-transform: uppercase;
-}
-.badge-green { border-color: var(--green); color: var(--green); }
-.badge-amber { border-color: var(--amber); color: var(--amber); }
-.badge-red   { border-color: var(--red);   color: var(--red);   }
-
-#modelBadge, #autoBadge { cursor: pointer; }
-
-/* ── Main grid ───────────────────────────────────────────────── */
-.grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr 320px;
-  grid-template-rows: auto auto;
-  gap: 12px;
-  padding: 12px;
-}
-
-@media (max-width: 1200px) {
-  .grid { grid-template-columns: 1fr 1fr; }
-  .col-right { grid-column: 1 / -1; }
-}
-@media (max-width: 700px) {
-  .grid { grid-template-columns: 1fr; }
-}
-
-/* ── Panel ───────────────────────────────────────────────────── */
-.panel {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  overflow: hidden;
-}
-.panel-head {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 10px 14px;
-  border-bottom: 1px solid var(--border);
-  background: var(--surface2);
-}
-.panel-head h2 {
-  font-family: var(--sans); font-size: .85rem; font-weight: 600;
-  color: var(--text-dim); letter-spacing: .08em; text-transform: uppercase;
-}
-.panel-body { padding: 12px; }
-
-/* ── Video / image tiles ─────────────────────────────────────── */
-.img-wrap {
-  position: relative;
-  aspect-ratio: 4/3;
-  background: #020702;
-  border-radius: 4px; overflow: hidden;
-  border: 1px solid var(--border);
-  display: flex; align-items: center; justify-content: center;
-}
-.img-wrap img {
-  width: 100%; height: 100%;
-  object-fit: contain;
-  display: block;
-}
-.img-placeholder {
-  color: var(--text-dim); font-family: var(--mono); font-size: .75rem;
-  text-align: center; line-height: 2;
-}
-.corner-tag {
-  position: absolute; top: 8px; left: 8px;
-  background: rgba(0,0,0,.7); border: 1px solid var(--green-dim);
-  color: var(--green); font-family: var(--mono); font-size: .65rem;
-  padding: 2px 6px; border-radius: 2px;
-}
-
-/* ── Stats row ───────────────────────────────────────────────── */
-.stats-row {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 8px; margin-top: 10px;
-}
-.stat {
-  background: var(--surface2);
-  border: 1px solid var(--border);
-  border-radius: 4px; padding: 10px 12px;
-}
-.stat-label {
-  font-family: var(--mono); font-size: .6rem;
-  color: var(--text-dim); text-transform: uppercase;
-  letter-spacing: .08em; margin-bottom: 4px;
-}
-.stat-value {
-  font-family: var(--mono); font-size: 1.3rem;
-  color: var(--green); font-weight: 700;
-}
-.stat-unit {
-  font-family: var(--mono); font-size: .62rem;
-  color: var(--text-dim); margin-top: 2px;
-}
-
-/* ── Carbon grid (right col) ─────────────────────────────────── */
-.mrv-list { display: flex; flex-direction: column; gap: 6px; }
-.mrv-row {
-  display: flex; justify-content: space-between; align-items: center;
-  padding: 8px 10px;
-  background: var(--surface2); border-radius: 4px;
-  border-left: 3px solid var(--green-dim);
-}
-.mrv-row:hover { border-left-color: var(--green); }
-.mrv-key { font-size: .75rem; color: var(--text-dim); }
-.mrv-val { font-family: var(--mono); font-size: .85rem; color: var(--green); }
-.mrv-unit { font-family: var(--mono); font-size: .65rem; color: var(--text-dim); margin-left: 4px; }
-
-.mrv-highlight {
-  border-left-color: var(--amber);
-  background: #1a140a;
-}
-.mrv-highlight .mrv-val { color: var(--amber); }
-
-/* ── Controls ────────────────────────────────────────────────── */
-.ctrl-grid { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
-
-.btn {
-  font-family: var(--mono); font-size: .75rem; font-weight: 700;
-  letter-spacing: .08em; text-transform: uppercase;
-  border: none; border-radius: 4px; cursor: pointer;
-  padding: 10px 16px; transition: all .15s;
-}
-.btn-green {
-  background: var(--green); color: #000;
-  box-shadow: 0 0 20px var(--green-glow);
-}
-.btn-green:hover { background: #00ff69; box-shadow: 0 0 30px var(--green-glow); }
-.btn-green:active { transform: scale(.97); }
-
-.btn-outline {
-  background: transparent; color: var(--text);
-  border: 1px solid var(--border);
-}
-.btn-outline:hover { border-color: var(--green); color: var(--green); }
-
-.btn-amber {
-  background: transparent; color: var(--amber);
-  border: 1px solid var(--amber);
-}
-.btn-amber:hover { background: rgba(255,195,85,.1); }
-
-label.ctrl-label {
-  font-family: var(--mono); font-size: .68rem;
-  color: var(--text-dim); text-transform: uppercase; letter-spacing: .06em;
-  display: block; margin-bottom: 4px;
-}
-
-input[type="range"] {
-  width: 100%; accent-color: var(--green);
-  background: transparent; cursor: pointer;
-}
-input[type="file"] { display: none; }
-
-select {
-  width: 100%; background: var(--surface2); color: var(--text);
-  border: 1px solid var(--border); border-radius: 4px;
-  padding: 6px 10px; font-family: var(--mono); font-size: .73rem;
-  cursor: pointer;
-}
-select:focus { outline: none; border-color: var(--green); }
-
-.conf-row { display: flex; align-items: center; justify-content: space-between; margin-top: 2px; }
-.conf-val { font-family: var(--mono); font-size: .75rem; color: var(--green); }
-
-/* ── Log ─────────────────────────────────────────────────────── */
-.log-box {
-  background: #020702; border-radius: 4px;
-  height: 220px; overflow-y: auto; padding: 8px;
-  font-family: var(--mono); font-size: .68rem; line-height: 1.7;
-  border: 1px solid var(--border);
-}
-.log-line { color: var(--text-dim); }
-.log-line .ts { color: var(--green-dim); margin-right: 6px; }
-.log-line.ok   .ts { color: var(--green); }
-.log-line.err  .ts { color: var(--red);   }
-.log-line.warn .ts { color: var(--amber); }
-
-/* ── Timestamp footer ────────────────────────────────────────── */
-.ts-footer {
-  font-family: var(--mono); font-size: .65rem;
-  color: var(--text-dim); margin-top: 8px; text-align: right;
-}
-
-/* ── Upload preview ──────────────────────────────────────────── */
-#uploadPreviewWrap { display: none; margin-top: 10px; }
-
-/* ── Pulse ring on capture btn ───────────────────────────────── */
-.capturing { animation: pulse-ring .6s ease-out; }
-@keyframes pulse-ring {
-  0%   { box-shadow: 0 0 0 0 var(--green-glow); }
-  100% { box-shadow: 0 0 0 20px transparent; }
-}
-</style>
+    <title>Mangrove Detection</title>
 </head>
-<body>
+<body style="text-align:center; font-family:sans-serif;">
 
-<!-- ── Header ─────────────────────────────────────────────────── -->
-<header>
-  <div class="logo">
-    <div class="logo-dot"></div>
-    MANGROVE DETECTION SYSTEM
-  </div>
-  <div class="header-right">
-    <span class="badge badge-green" id="modelBadge" title="Model status">MODEL —</span>
-    <span class="badge badge-amber" id="autoBadge"
-          onclick="toggleAuto()" title="Click to toggle auto-capture">AUTO ●</span>
-    <span class="badge badge-green" id="liveBadge">LIVE</span>
-  </div>
-</header>
+<h2>ESP32 Mangrove Detection</h2>
 
-<!-- ── Main grid ─────────────────────────────────────────────── -->
-<div class="grid">
+<img id="resultImage" width="640"><br><br>
 
-  <!-- Col 1 – Live Feed -->
-  <div class="panel">
-    <div class="panel-head">
-      <h2>📷 ESP32 Live Feed</h2>
-      <span class="badge badge-green" style="font-size:.62rem">MJPEG STREAM</span>
-    </div>
-    <div class="panel-body">
-      <div class="img-wrap">
-        <img id="streamImg" src="/stream" alt="Live Feed"
-             onerror="this.style.display='none';
-                      document.getElementById('streamErr').style.display='flex'">
-        <div id="streamErr" class="img-placeholder" style="display:none">
-          ⚠ No signal<br>
-          <span style="font-size:.6rem">Check ESP32 URL in main.py</span>
-        </div>
-        <div class="corner-tag">LIVE</div>
-      </div>
+<!-- Resolution Selector -->
+Resolution:
+<select id="resolutionSelect">
+    {% for res in resolutions %}
+        <option value="{{ res }}">{{ res }}</option>
+    {% endfor %}
+</select>
+<button onclick="changeResolution()">Apply</button>
+<br><br>
 
-      <!-- Mini stats below feed -->
-      <div class="stats-row">
-        <div class="stat">
-          <div class="stat-label">Mangroves</div>
-          <div class="stat-value" id="sTotal">—</div>
-        </div>
-        <div class="stat">
-          <div class="stat-label">CO₂ (t)</div>
-          <div class="stat-value" id="sCO2">—</div>
-        </div>
-        <div class="stat">
-          <div class="stat-label">Area (m²)</div>
-          <div class="stat-value" id="sArea">—</div>
-        </div>
-      </div>
-    </div>
-  </div>
+<!-- Confidence Slider -->
+Confidence:
+<input type="range" id="confidenceSlider" min="0.1" max="0.9" step="0.05" value="0.3">
+<span id="confValue">0.3</span><br><br>
 
-  <!-- Col 2 – Detection Result -->
-  <div class="panel">
-    <div class="panel-head">
-      <h2>🔍 Detection Result</h2>
-      <span id="detSource" class="badge badge-green" style="font-size:.62rem">—</span>
-    </div>
-    <div class="panel-body">
-      <div class="img-wrap">
-        <img id="detImg" src="" alt="" style="display:none">
-        <div id="detPlaceholder" class="img-placeholder">
-          No detection yet<br>
-          <span style="font-size:.6rem">Capture or wait for auto-cycle</span>
-        </div>
-        <div class="corner-tag" id="detConfTag">CONF —</div>
-      </div>
-      <div class="ts-footer" id="detTs">—</div>
+<!-- Auto Detect -->
+Auto Detect Every (seconds):
+<input type="number" id="intervalInput" value="5" min="1">
+<button onclick="startAutoDetect()">Start</button>
+<button onclick="stopAutoDetect()">Stop</button><br><br>
 
-      <!-- Detection list (scrollable) -->
-      <div style="margin-top:8px; max-height:100px; overflow-y:auto;" id="detList"></div>
-    </div>
-  </div>
+<button onclick="manualDetect()">Run Detection</button>
+<button onclick="sendToFirebase()">Send to Firebase</button>
 
-  <!-- Col 3 – MRV + Controls -->
-  <div class="panel col-right" style="grid-row: 1 / 3;">
-    <div class="panel-head"><h2>🌍 MRV / Carbon Data</h2></div>
-    <div class="panel-body">
-
-      <div class="mrv-list">
-        <div class="mrv-row">
-          <span class="mrv-key">🌳 Mangroves detected</span>
-          <span><span class="mrv-val" id="mTotal">—</span></span>
-        </div>
-        <div class="mrv-row">
-          <span class="mrv-key">📏 Area</span>
-          <span><span class="mrv-val" id="mAreaM2">—</span>
-                <span class="mrv-unit">m²</span></span>
-        </div>
-        <div class="mrv-row">
-          <span class="mrv-key">📐 Area</span>
-          <span><span class="mrv-val" id="mAreaHa">—</span>
-                <span class="mrv-unit">ha</span></span>
-        </div>
-        <div class="mrv-row">
-          <span class="mrv-key">🟤 Carbon stock</span>
-          <span><span class="mrv-val" id="mCarbon">—</span>
-                <span class="mrv-unit">t C</span></span>
-        </div>
-        <div class="mrv-row mrv-highlight">
-          <span class="mrv-key">💨 CO₂ equivalent</span>
-          <span><span class="mrv-val" id="mCO2">—</span>
-                <span class="mrv-unit">t CO₂</span></span>
-        </div>
-        <div class="mrv-row mrv-highlight">
-          <span class="mrv-key">🌲 Trees equiv / yr</span>
-          <span><span class="mrv-val" id="mTrees">—</span></span>
-        </div>
-      </div>
-
-      <div style="height:1px; background:var(--border); margin:16px 0;"></div>
-
-      <!-- Controls -->
-      <div class="ctrl-grid">
-
-        <button class="btn btn-green" id="captureBtn" onclick="captureNow()">
-          ▶ Capture &amp; Detect
-        </button>
-
-        <div>
-          <label class="ctrl-label">Confidence threshold
-            <span class="conf-val" id="confDisplay">{{ auto_conf }}</span>
-          </label>
-          <input type="range" id="confSlider" min="0.05" max="1" step="0.05"
-                 value="{{ auto_conf }}" oninput="updateConf(this.value)">
-        </div>
-
-        <div>
-          <label class="ctrl-label">ESP32 Resolution</label>
-          <select id="resSelect">
-            {% for r in resolutions %}
-            <option {% if 'QVGA' in r %}selected{% endif %}>{{ r }}</option>
-            {% endfor %}
-          </select>
-          <button class="btn btn-outline" style="margin-top:4px; width:100%"
-                  onclick="setResolution()">Set Resolution</button>
-        </div>
-
-        <div>
-          <label class="ctrl-label">Manual image upload</label>
-          <input type="file" id="fileInput" accept="image/*" onchange="uploadFile()">
-          <button class="btn btn-outline" style="width:100%"
-                  onclick="document.getElementById('fileInput').click()">
-            Upload Image
-          </button>
-          <div id="uploadPreviewWrap">
-            <div class="img-wrap" style="margin-top:8px">
-              <img id="uploadPreview" src="" alt="Upload preview">
-            </div>
-          </div>
-        </div>
-
-        <div style="display:flex; gap:6px;">
-          <button class="btn btn-amber" style="flex:1" onclick="toggleAuto()">
-            Toggle Auto
-          </button>
-          <button class="btn btn-outline" style="flex:1" onclick="clearLog()">
-            Clear Log
-          </button>
-        </div>
-
-      </div>
-
-      <div style="height:1px; background:var(--border); margin:16px 0;"></div>
-
-      <!-- Activity log -->
-      <div class="panel-head" style="margin:-12px -12px 8px; padding:8px 12px;">
-        <h2>📋 Activity Log</h2>
-      </div>
-      <div class="log-box" id="logBox"></div>
-
-    </div>
-  </div>
-
-  <!-- Row 2 – Full-width info bar (spans col 1+2) -->
-  <div class="panel" style="grid-column: 1 / 3;">
-    <div class="panel-head">
-      <h2>ℹ️ Pipeline Info</h2>
-      <span class="badge badge-green" style="font-size:.62rem">Firebase ●</span>
-    </div>
-    <div class="panel-body" style="display:grid; grid-template-columns:repeat(4,1fr); gap:10px;">
-      <div class="stat"><div class="stat-label">ESP32 source</div>
-        <div class="stat-value" style="font-size:.7rem; word-break:break-all">{{ "ESP32_URL"|upper }}</div></div>
-      <div class="stat"><div class="stat-label">Firebase input</div>
-        <div class="stat-value" style="font-size:.7rem">/captured_images</div></div>
-      <div class="stat"><div class="stat-label">Firebase output</div>
-        <div class="stat-value" style="font-size:.7rem">/MVR/latest</div></div>
-      <div class="stat"><div class="stat-label">Auto interval</div>
-        <div class="stat-value">{{ capture_interval }}s</div></div>
-    </div>
-  </div>
-
-</div><!-- /grid -->
+<h3 id="stats"></h3>
 
 <script>
-/* ─── State ───────────────────────────────────────────────────── */
-let conf      = {{ auto_conf }};
-let autoOn    = {{ 'true' if auto_capture else 'false' }};
-let logLines  = [];
 
-/* ─── Confidence ──────────────────────────────────────────────── */
-function updateConf(v) {
-  conf = parseFloat(v);
-  document.getElementById('confDisplay').textContent = conf.toFixed(2);
-}
+let autoInterval = null;
+let lastResult = null;
 
-/* ─── Auto-toggle ─────────────────────────────────────────────── */
-async function toggleAuto() {
-  const r = await fetch('/toggle_auto', {method:'POST'});
-  const d = await r.json();
-  autoOn  = d.auto_capture;
-  updateAutoBadge();
-  appendLog({time: now(), msg: `Auto-capture ${autoOn ? 'ON' : 'OFF'}`,
-             type: autoOn ? 'ok' : 'warn'});
-}
+const slider = document.getElementById("confidenceSlider");
+const confValue = document.getElementById("confValue");
 
-function updateAutoBadge() {
-  const b = document.getElementById('autoBadge');
-  b.textContent = autoOn ? 'AUTO ●' : 'AUTO ○';
-  b.className   = autoOn ? 'badge badge-green' : 'badge badge-amber';
-}
+slider.oninput = function() {
+    confValue.innerText = this.value;
+};
 
-/* ─── Capture ─────────────────────────────────────────────────── */
-async function captureNow() {
-  const btn = document.getElementById('captureBtn');
-  btn.classList.add('capturing');
-  btn.textContent = '⏳ Processing…';
-  btn.disabled    = true;
+async function manualDetect() {
+    const confidence = parseFloat(slider.value);
 
-  appendLog({time: now(), msg: '📸 Manual capture triggered', type: 'ok'});
-
-  try {
-    const r = await fetch('/capture_now', {
-      method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({conf})
+    const response = await fetch("/detect", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({confidence: confidence})
     });
-    const d = await r.json();
-    appendLog({time: now(),
-               msg: d.success ? '✅ Pipeline started' : `❌ ${d.error}`,
-               type: d.success ? 'ok' : 'err'});
-  } catch(e) {
-    appendLog({time: now(), msg: `❌ ${e}`, type:'err'});
-  }
 
-  setTimeout(() => {
-    btn.classList.remove('capturing');
-    btn.textContent = '▶ Capture & Detect';
-    btn.disabled    = false;
-  }, 2000);
+    const data = await response.json();
+    lastResult = data;
+
+    document.getElementById("resultImage").src =
+        "data:image/jpeg;base64," + data.image;
+
+    document.getElementById("stats").innerText =
+        "Detected: " + data.total_detections +
+        " | CO2: " + data.carbon.co2_tons + " tons";
 }
 
-/* ─── Upload ──────────────────────────────────────────────────── */
-async function uploadFile() {
-  const file = document.getElementById('fileInput').files[0];
-  if (!file) return;
-
-  // preview
-  const url = URL.createObjectURL(file);
-  document.getElementById('uploadPreview').src = url;
-  document.getElementById('uploadPreviewWrap').style.display = 'block';
-
-  const fd = new FormData();
-  fd.append('file', file);
-  fd.append('conf', conf);
-
-  appendLog({time: now(), msg: `📤 Uploading ${file.name}`, type:'ok'});
-  try {
-    const r = await fetch('/upload', {method:'POST', body: fd});
-    const d = await r.json();
-    appendLog({time: now(),
-               msg: d.success ? '✅ Upload accepted – processing…' : `❌ ${d.error}`,
-               type: d.success ? 'ok' : 'err'});
-  } catch(e) {
-    appendLog({time: now(), msg: `❌ ${e}`, type:'err'});
-  }
+function startAutoDetect() {
+    const seconds = parseInt(document.getElementById("intervalInput").value);
+    autoInterval = setInterval(manualDetect, seconds * 1000);
 }
 
-/* ─── Resolution ──────────────────────────────────────────────── */
-async function setResolution() {
-  const res = document.getElementById('resSelect').value;
-  appendLog({time: now(), msg: `📐 Setting resolution: ${res}`, type:'ok'});
-  const r = await fetch('/set_resolution', {
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({resolution: res})
-  });
-  const d = await r.json();
-  appendLog({time: now(),
-             msg: d.success ? `✅ Resolution set` : `❌ Failed`,
-             type: d.success ? 'ok' : 'err'});
+function stopAutoDetect() {
+    clearInterval(autoInterval);
 }
 
-/* ─── Poll latest detection ───────────────────────────────────── */
-async function pollLatest() {
-  try {
-    const r = await fetch('/latest');
-    const d = await r.json();
-    if (d.success && d.data) {
-      updateDetectionUI(d.data);
+async function changeResolution() {
+    const resolution = document.getElementById("resolutionSelect").value;
+
+    await fetch("/set_resolution", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({resolution: resolution})
+    });
+
+    alert("Resolution changed");
+}
+
+async function sendToFirebase() {
+    if (!lastResult) {
+        alert("Run detection first");
+        return;
     }
-  } catch(_) {}
+
+    await fetch("/send_to_firebase", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({
+            timestamp: lastResult.timestamp,
+            detection_summary: {
+                total_mangroves: lastResult.total_detections,
+                area_m2: lastResult.carbon.area_m2,
+                area_hectares: lastResult.carbon.area_ha
+            },
+            carbon_sequestration: {
+                carbon_stock_tons: lastResult.carbon.carbon_tons,
+                co2_equivalent_tons: lastResult.carbon.co2_tons,
+                trees_equivalent_per_year: lastResult.carbon.trees
+            },
+            detections: lastResult.detections,
+            source: "esp32_flask_local"
+        })
+    });
+
+    alert("Sent to Firebase");
 }
 
-function updateDetectionUI(data) {
-  const c = data.carbon || {};
-  const total = data.total ?? 0;
-
-  // mini stats
-  set('sTotal', total);
-  set('sCO2',   c.co2_tons   ?? '—');
-  set('sArea',  c.area_m2    ?? '—');
-
-  // MRV panel
-  set('mTotal',  total);
-  set('mAreaM2', fmt(c.area_m2));
-  set('mAreaHa', fmt(c.area_ha, 4));
-  set('mCarbon', fmt(c.carbon_tons));
-  set('mCO2',    fmt(c.co2_tons));
-  set('mTrees',  c.trees_equiv != null ? c.trees_equiv.toLocaleString() : '—');
-
-  // Annotated image
-  if (data.annotated_b64) {
-    const img = document.getElementById('detImg');
-    img.src = 'data:image/jpeg;base64,' + data.annotated_b64;
-    img.style.display = 'block';
-    document.getElementById('detPlaceholder').style.display = 'none';
-  }
-
-  // Badges / tags
-  document.getElementById('detSource').textContent = (data.source || '—').toUpperCase();
-  document.getElementById('detConfTag').textContent =
-    `CONF ${data.conf ? (data.conf*100).toFixed(0)+'%' : '—'}`;
-  document.getElementById('detTs').textContent =
-    data.timestamp ? `Last: ${new Date(data.timestamp).toLocaleString()}` : '—';
-
-  // Detection list
-  const list = document.getElementById('detList');
-  if (data.detections && data.detections.length) {
-    list.innerHTML = data.detections.map(d =>
-      `<div style="font-family:var(--mono);font-size:.63rem;color:var(--text-dim);
-                   padding:2px 0; border-bottom:1px solid var(--border)">
-         #${d.id} <span style="color:var(--green)">${d.class}</span>
-         &nbsp;${d.confidence}%&nbsp;&nbsp;${d.area_pixels}px
-       </div>`).join('');
-  } else {
-    list.innerHTML = '';
-  }
-}
-
-/* ─── Poll activity log ───────────────────────────────────────── */
-async function pollLog() {
-  try {
-    const r = await fetch('/logs');
-    const entries = await r.json();
-    if (entries.length !== logLines.length) {
-      logLines = entries;
-      renderLog();
-    }
-  } catch(_) {}
-}
-
-function renderLog() {
-  const box = document.getElementById('logBox');
-  box.innerHTML = logLines.map(e => {
-    const cls = e.msg.startsWith('✅') ? 'ok'
-              : e.msg.startsWith('❌') ? 'err'
-              : e.msg.startsWith('⚠') ? 'warn' : '';
-    return `<div class="log-line ${cls}"><span class="ts">${e.time}</span>${e.msg}</div>`;
-  }).join('');
-  box.scrollTop = box.scrollHeight;
-}
-
-function appendLog(e) {
-  logLines.push(e);
-  if (logLines.length > 200) logLines.shift();
-  renderLog();
-}
-
-function clearLog() { logLines = []; renderLog(); }
-
-/* ─── Health check (model badge) ─────────────────────────────── */
-async function checkHealth() {
-  try {
-    const r = await fetch('/health');
-    const d = await r.json();
-    const mb = document.getElementById('modelBadge');
-    if (d.model_loaded) {
-      mb.textContent = 'MODEL ✓';
-      mb.className   = 'badge badge-green';
-    } else {
-      mb.textContent = 'NO MODEL';
-      mb.className   = 'badge badge-red';
-    }
-    autoOn = d.auto_capture;
-    updateAutoBadge();
-  } catch(_) {}
-}
-
-/* ─── Helpers ─────────────────────────────────────────────────── */
-function set(id, val) {
-  const el = document.getElementById(id);
-  if (el) el.textContent = val;
-}
-function fmt(v, dp=2) {
-  if (v == null || v === '') return '—';
-  return parseFloat(v).toLocaleString(undefined, {minimumFractionDigits:dp, maximumFractionDigits:dp});
-}
-function now() { return new Date().toLocaleTimeString(); }
-
-/* ─── Boot ────────────────────────────────────────────────────── */
-checkHealth();
-pollLatest();
-pollLog();
-setInterval(pollLatest, 3000);
-setInterval(pollLog,    2000);
-setInterval(checkHealth, 15000);
 </script>
+
 </body>
 </html>

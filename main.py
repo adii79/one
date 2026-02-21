@@ -10,14 +10,22 @@ from ultralytics import YOLO
 from datetime import datetime
 
 # =========================
-# CONFIG
+# FIREBASE CONFIG
+# =========================
+FIREBASE_HOST = "https://your-project-id-default-rtdb.firebaseio.com"
+FIREBASE_AUTH = "your_database_secret_or_token"
+OUTPUT_PATH = "/MVR"
+
+# =========================
+# ESP32 CONFIG
 # =========================
 ESP32_STREAM_URL = "http://192.168.4.1:81/stream"
 ESP32_CONTROL_URL = "http://192.168.4.1/control?var=framesize&val="
 MODEL_PATH = "best.pt"
 
-FIREBASE_DB_URL = "https://your-project-id-default-rtdb.firebaseio.com/carbon_data.json"
-
+# =========================
+# RESOLUTION MAP
+# =========================
 RESOLUTION_MAP = {
     "QQVGA (160x120)": 10,
     "QVGA (320x240)": 8,
@@ -26,31 +34,23 @@ RESOLUTION_MAP = {
     "XGA (1024x768)": 4,
 }
 
-# Example Carbon Emission Factors (kg CO2 per detection event)
-CARBON_FACTORS = {
-    "person": 0.02,
-    "car": 2.3,
-    "truck": 5.5,
-    "bus": 6.8,
-    "motorcycle": 1.1
-}
-
 # =========================
-# LOAD MODEL
+# LOAD YOLO
 # =========================
 model = YOLO(MODEL_PATH)
 
 # =========================
-# HELPER FUNCTIONS
+# CARBON CALCULATION (No class factors)
 # =========================
-def calculate_carbon(object_name, confidence):
-    base_value = CARBON_FACTORS.get(object_name.lower(), 0.01)
-    return round(base_value * confidence, 4)
+def calculate_carbon(confidence):
+    BASE_CARBON_UNIT = 1.0  # kg CO2 per detection (adjust if needed)
+    return round(BASE_CARBON_UNIT * confidence, 4)
 
 def send_carbon_to_firebase(data):
     try:
-        requests.post(FIREBASE_DB_URL, json=data, timeout=3)
-        print("Carbon data sent to Firebase")
+        url = f"{FIREBASE_HOST}{OUTPUT_PATH}/latest_detection.json?auth={FIREBASE_AUTH}"
+        requests.put(url, json=data, timeout=5)
+        print("Detection metadata sent to Firebase")
     except Exception as e:
         print("Firebase Error:", e)
 
@@ -88,11 +88,11 @@ class YOLOApp:
         main_frame = tk.Frame(self.root, bg="#1e1e1e")
         main_frame.pack(fill="both", expand=True)
 
-        # LEFT - Video
+        # Video display
         self.video_label = tk.Label(main_frame, bg="black")
         self.video_label.pack(side="left", padx=20, pady=20, expand=True)
 
-        # RIGHT - Controls
+        # Controls
         control_frame = tk.Frame(main_frame, bg="#2d2d2d", width=400)
         control_frame.pack(side="right", fill="y", padx=10, pady=10)
 
@@ -140,7 +140,6 @@ class YOLOApp:
                   bg="#444", fg="white",
                   width=20).pack(pady=10)
 
-        # Buttons
         tk.Button(control_frame, text="Start Stream",
                   command=self.start_stream,
                   font=("Arial", 14),
@@ -165,7 +164,6 @@ class YOLOApp:
                   bg="#ffc107", fg="black",
                   width=20).pack(pady=5)
 
-        # Results
         tk.Label(control_frame, text="Detection Results",
                  font=("Arial", 16, "bold"),
                  bg="#2d2d2d", fg="white").pack(pady=15)
@@ -188,27 +186,32 @@ class YOLOApp:
         self.running = False
 
     def stream_video(self):
-        stream = requests.get(ESP32_STREAM_URL, stream=True)
-        bytes_data = b''
+        try:
+            stream = requests.get(ESP32_STREAM_URL, stream=True)
+            bytes_data = b''
 
-        for chunk in stream.iter_content(chunk_size=1024):
-            if not self.running:
-                break
+            for chunk in stream.iter_content(chunk_size=1024):
+                if not self.running:
+                    break
 
-            bytes_data += chunk
-            a = bytes_data.find(b'\xff\xd8')
-            b = bytes_data.find(b'\xff\xd9')
+                bytes_data += chunk
+                a = bytes_data.find(b'\xff\xd8')
+                b = bytes_data.find(b'\xff\xd9')
 
-            if a != -1 and b != -1:
-                jpg = bytes_data[a:b+2]
-                bytes_data = bytes_data[b+2:]
+                if a != -1 and b != -1:
+                    jpg = bytes_data[a:b+2]
+                    bytes_data = bytes_data[b+2:]
 
-                image = cv2.imdecode(
-                    np.frombuffer(jpg, dtype=np.uint8),
-                    cv2.IMREAD_COLOR
-                )
-                self.current_frame = image
-                self.display_frame(image)
+                    image = cv2.imdecode(
+                        np.frombuffer(jpg, dtype=np.uint8),
+                        cv2.IMREAD_COLOR
+                    )
+
+                    self.current_frame = image
+                    self.display_frame(image)
+
+        except Exception as e:
+            print("Stream Error:", e)
 
     def display_frame(self, frame):
         frame = cv2.resize(frame, (900, 650))
@@ -218,7 +221,7 @@ class YOLOApp:
         self.video_label.image = img
 
     # =========================
-    # DETECTION + CARBON
+    # DETECTION
     # =========================
     def detect_objects(self):
         if self.current_frame is None:
@@ -240,7 +243,7 @@ class YOLOApp:
             conf_val = float(box.conf[0])
             name = model.names[cls]
 
-            carbon_value = calculate_carbon(name, conf_val)
+            carbon_value = calculate_carbon(conf_val)
             total_carbon += carbon_value
 
             self.result_text.insert(
@@ -255,10 +258,14 @@ class YOLOApp:
             })
 
         firebase_data = {
-            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "timestamp": datetime.now().isoformat(),
             "total_carbon_kg": round(total_carbon, 4),
             "detection_count": len(detections_payload),
-            "detections": detections_payload
+            "detections": detections_payload,
+            "system": {
+                "confidence_threshold": conf,
+                "resolution": self.resolution_var.get()
+            }
         }
 
         threading.Thread(
@@ -277,7 +284,11 @@ class YOLOApp:
 
     def auto_loop(self):
         while self.auto_detect:
-            time.sleep(int(self.interval_entry.get()))
+            try:
+                interval = int(self.interval_entry.get())
+            except:
+                interval = 5
+            time.sleep(interval)
             self.detect_objects()
 
     # =========================
@@ -286,8 +297,11 @@ class YOLOApp:
     def set_resolution(self):
         res_key = self.resolution_var.get()
         val = RESOLUTION_MAP[res_key]
-        requests.get(ESP32_CONTROL_URL + str(val))
-        messagebox.showinfo("Success", "Resolution Updated!")
+        try:
+            requests.get(ESP32_CONTROL_URL + str(val))
+            messagebox.showinfo("Success", "Resolution Updated!")
+        except:
+            messagebox.showerror("Error", "Failed to update resolution")
 
 # =========================
 # RUN
